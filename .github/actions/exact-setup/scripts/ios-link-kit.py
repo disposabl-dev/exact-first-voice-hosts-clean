@@ -1,0 +1,176 @@
+#!/usr/bin/env python3
+"""Experimental, fail-closed Exact link kit. Requires a fresh SDK production receipt.
+
+This is not a replacement for Exact's archive/signing checks. The caller must run
+Exact's normal packaging and validate that the receipt belongs to this source.
+"""
+import argparse, hashlib, json, os, re, shutil, struct, subprocess
+from pathlib import Path
+
+COMPILED = ('module.rs', 'logic.rs', 'linked.rs', 'host.rs')
+PAYLOAD = ('app.plan', 'compat.json', 'app.hbc')
+
+# Reviewed revisions of the optional SDK link hook. Each falls back to SwiftPM.
+REVIEWED_HOOKS = {
+    'ca35ee6a7658062b3b77ee71590095d0384e8df1a913b15de1bbf99b27a8e9e4',
+    'd140dc0ab3866a6572ec52c696c7724430e0ad207b1a38df225404638127c99e',
+    'e79fa8d9b9f228f0b36130909643b436d27abd6c1882ae3f34189b6144ed8336',
+}
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b''): h.update(chunk)
+    return h.hexdigest()
+
+def load(path): return json.loads(Path(path).read_text())
+
+def toolchain():
+    return [subprocess.check_output(cmd, text=True).strip() for cmd in (
+        ['/usr/bin/xcodebuild', '-version'],
+        ['/usr/bin/xcrun', '--sdk', 'iphoneos', '--show-sdk-version'],
+        ['/usr/bin/xcrun', '--sdk', 'iphoneos', '--show-sdk-path'],
+        ['/usr/bin/xcrun', 'swiftc', '--version'])]
+
+def verify_sections(executable, bake):
+    data = Path(executable).read_bytes()
+    if len(data) < 32 or struct.unpack_from('<I', data)[0] != 0xfeedfacf:
+        raise ValueError('Linked executable is not a 64-bit Mach-O')
+    count, size = struct.unpack_from('<II', data, 16)
+    at, end, found = 32, 32 + size, {}
+    if end > len(data): raise ValueError('Invalid Mach-O load commands')
+    for _ in range(count):
+        if at + 8 > end: raise ValueError('Truncated Mach-O command')
+        cmd, length = struct.unpack_from('<II', data, at)
+        if length < 8 or at + length > end: raise ValueError('Invalid Mach-O command')
+        if cmd == 0x19:
+            if length < 72: raise ValueError('Invalid segment')
+            segments = struct.unpack_from('<I', data, at+64)[0]
+            if 72 + 80*segments > length: raise ValueError('Invalid sections')
+            for i in range(segments):
+                section=at+72+i*80
+                name=data[section:section+16].split(b'\0')[0].decode()
+                segment=data[section+16:section+32].split(b'\0')[0].decode()
+                if segment != '__TEXT' or name not in ('__exact_plan','__exact_compat','__exact_hbc'): continue
+                length2=struct.unpack_from('<Q',data,section+40)[0]
+                offset=struct.unpack_from('<I',data,section+48)[0]
+                if name in found or offset+length2 > len(data): raise ValueError('Invalid linked section')
+                found[name]=data[offset:offset+length2]
+        at += length
+    for section, filename in zip(('__exact_plan','__exact_compat','__exact_hbc'),PAYLOAD):
+        if found.get(section) != (Path(bake)/filename).read_bytes(): raise ValueError('Linked section mismatch: '+section)
+
+def facts(receipt, bake, app):
+    r = load(receipt); compat = load(Path(bake) / 'compat.json')
+    if r.get('trust') != 'production' or r.get('compat', {}).get('target') != 'aarch64-apple-ios' or r['compat'] != compat:
+        raise ValueError('Receipt and baked production iOS compatibility do not match')
+    if compat.get('inputs', {}).get('platform') != 'ios' or compat.get('embedded', {}).get('trust') != 'production':
+        raise ValueError('Not a production iOS bake')
+    if digest(Path(bake)/'app.plan') != compat['embedded']['plan']['sha256'] or digest(Path(bake)/'app.hbc') != compat['inputs']['typescriptModule']:
+        raise ValueError('Baked plan or bytecode does not match compatibility record')
+    products = sorted({p['sha256'] for p in r['products'] if p['path'].endswith('.a')})
+    if len(products) != 1: raise ValueError('Expected exactly one native archive in receipt')
+    inputs = dict(compat['inputs']); inputs.pop('app', None); inputs.pop('keys', None); inputs.pop('typescriptModule', None)
+    binary = r['binary']['sourceInputs']
+    source = {k: binary.get(k) for k in ('version', 'files', 'inventories', 'links', 'directories', 'absent')}
+    source['files'] = [dict(item) for item in source['files']]
+    for item in source['files']:
+        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item['sha256'] in REVIEWED_HOOKS:
+            item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
+        if item.get('root') == 'app' and item.get('path') == '.exact/shells/Cargo.toml':
+            path = Path(app)/item['path']; raw = path.read_bytes()
+            if hashlib.sha256(raw).hexdigest() != item['sha256']: raise ValueError('Generated Cargo.toml does not match receipt')
+            first, sep, rest = raw.partition(b'\n')
+            if not sep or not first.startswith(b'# ') or not first.endswith(b"'s native workspace, generated by exact2 from app.json and the app's own crates (LLP 1153 D1,"):
+                raise ValueError('Unexpected generated Cargo.toml header')
+            item['sha256'] = hashlib.sha256(rest).hexdigest()
+    graph = r['graph']
+    topology = {k: graph.get(k) for k in ('extensions', 'uses', 'loads', 'surfaceCalls', 'mediaSession')}
+    topology['artifacts'] = []
+    for artifact in graph['artifacts']:
+        artifact = dict(artifact)
+        if artifact.get('name') == 'app.plan':
+            artifact.pop('sha256', None); artifact.pop('bytes', None)
+            artifact['requires'] = dict(artifact.get('requires', {})); artifact['requires'].pop('app', None)
+        topology['artifacts'].append(artifact)
+    metadata = r['binary']['metadata']
+    native_metadata = {k: v for k, v in metadata.items() if k not in ('app', 'delivery', 'keys')}
+    return {'archive': products[0], 'compiled': {n:digest(Path(bake)/n) for n in COMPILED},
+            'compat': inputs, 'source': source, 'topology': topology, 'metadata': native_metadata,
+            'configuration': r['binary']['configuration']}
+
+def runtime_grants(facts):
+    # Only a single wss endpoint may vary across the public template's grants.
+    # Preserve each field, role, line count and every other native fact.
+    result=json.loads(json.dumps(facts)); origins=[]
+    pattern=re.compile(r'net\.websocket (wss://[A-Za-z0-9.-]+(?::[0-9]{1,5})?)')
+    def normalize(value):
+        if value is None or value == '': return value
+        if not isinstance(value,str): raise ValueError('Unexpected grant type; use normal Exact build')
+        match=pattern.fullmatch(value)
+        if not match: raise ValueError('Only one wss WebSocket grant is eligible; use normal Exact build')
+        origins.append(match.group(1))
+        return 'net.websocket wss://<app-origin>'
+    for item in result['source']['files']:
+        if item.get('root') == 'exact' and item.get('path') == 'host/apple/build.mjs' and item.get('sha256') in REVIEWED_HOOKS:
+            item['sha256'] = 'reviewed-ios-link-hook-v1-v2'
+    compat=result['compat']
+    for name in ('grantCeiling','rustGrants','javascriptGrants'):
+        if name in compat: compat[name]=normalize(compat[name])
+    if not origins: raise ValueError('Missing wss WebSocket grant; use normal Exact build')
+    for artifact in result['topology']['artifacts']:
+        if artifact.get('name')=='app.plan' and 'grantCeiling' in artifact.get('requires', {}):
+            artifact['requires']['grantCeiling']=normalize(artifact['requires']['grantCeiling'])
+    if len(set(origins)) != 1: raise ValueError('WebSocket grants name different origins; use normal Exact build')
+    return result
+
+def main():
+    parser=argparse.ArgumentParser(); parser.add_argument('mode', choices=['create','link']); parser.add_argument('--app', default=os.getcwd()); parser.add_argument('--kit', required=True); parser.add_argument('--receipt', required=True); parser.add_argument('--bake', required=True); parser.add_argument('--out'); parser.add_argument('--proof')
+    a=parser.parse_args(); kit=Path(a.kit).resolve(); current=facts(a.receipt,a.bake,a.app)
+    if a.mode == 'create':
+        if not a.proof or kit.exists(): raise ValueError('Create requires a new kit and the reviewed proof directory')
+        proof=Path(a.proof).resolve(); commands=load(proof/'commands.json'); expected=load(proof/'digests.json')
+        if not expected or any(digest(proof/n)!=h for n,h in expected.items()): raise ValueError('Input digest mismatch')
+        archives=[n for n in expected if n.endswith('.a')]
+        if len(archives)!=1 or expected[archives[0]]!=current['archive']: raise ValueError('Receipt archive does not match')
+        # Do not accept a kit carrying native frameworks or arbitrary external inputs.
+        developer=os.path.realpath(subprocess.check_output(['/usr/bin/xcrun','--sdk','iphoneos','--show-sdk-path'],text=True).strip()).split('/Platforms/', 1)[0]
+        allowed=(str(proof),developer,'/Applications','/usr','/System','/Library')
+        for x in commands:
+            path = x[2:] if x.startswith(('-L/', '-F/')) else x[1:] if x.startswith('@/') else x
+            if path.startswith('/') and not any(os.path.realpath(path)==root or os.path.realpath(path).startswith(root+'/') for root in allowed):
+                raise ValueError('Unowned command path: '+x)
+        kit.mkdir(parents=True)
+        for n in expected: shutil.copyfile(proof/n,kit/n)
+        names=[n for n in expected if n.endswith('.o')]; names.sort()
+        (kit/'link.txt').write_text(' '.join(str(kit/n) for n in names))
+        cmds=[x.replace(str(proof),'@KIT@') for x in commands]
+        (kit/'kit.json').write_text(json.dumps({'facts':current, 'digests':expected, 'commands':cmds, 'toolchain':toolchain()},sort_keys=True,indent=2))
+        print('kit created:',kit)
+    else:
+        if not a.out: raise ValueError('Link requires --out')
+        record=load(kit/'kit.json')
+        if record['toolchain'] != toolchain(): raise ValueError('Apple toolchain differs; use normal Exact build')
+        if runtime_grants(record['facts']) != runtime_grants(current): raise ValueError('Native inputs differ; use normal Exact build')
+        if any(digest(kit/n)!=h for n,h in record['digests'].items()): raise ValueError('Kit digest mismatch')
+        out=Path(a.out).resolve()
+        if out.exists(): raise ValueError('Output already exists')
+        scratch=out.parent; scratch.mkdir(parents=True,exist_ok=True)
+        # The SDK command has one output, two temporary linker paths, and three payloads.
+        filelist=Path(str(out)+'.inputs')
+        names=sorted(n for n in record['digests'] if n.endswith('.o'))
+        filelist.write_text(' '.join(str(kit/n) for n in names))
+        cmd=[]
+        for x in record['commands']:
+            x=x.replace('@KIT@', str(kit))
+            if x=='@'+str(kit/'link.txt'): x='@'+str(filelist)
+            elif x==str(kit/'ExactIOS'): x=str(out)
+            elif x==str(kit/'lto.o'): x=str(out)+'.lto'
+            elif x==str(kit/'dependency.dat'): x=str(out)+'.deps'
+            elif x in [str(kit/n) for n in PAYLOAD]: x=str(Path(a.bake).resolve()/Path(x).name)
+            cmd.append(x)
+        subprocess.run(cmd,check=True)
+        verify_sections(out, a.bake)
+        print('linked:',out)
+
+if __name__=='__main__': main()

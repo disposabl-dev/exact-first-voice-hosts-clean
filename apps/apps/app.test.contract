@@ -1,0 +1,3 @@
+test "voice notes opens"
+  expect tree has "recorder"
+  expect tree has "toggle"

@@ -1,0 +1,14 @@
+// Build APK and AAB from the same staged inputs, unless recovering the APK alone.
+import groovy.json.JsonOutput
+
+gradle.settingsEvaluated {
+    def p = gradle.startParameter
+    if (System.getenv('EXACT_ANDROID_APK_ONLY') != '1' && p.taskNames == [':app:assembleRelease']) {
+        p.taskNames = [':app:assembleRelease', ':app:bundleRelease']
+        new File(System.getenv('EXACT_GRADLE_CAPTURE')).text = JsonOutput.toJson([
+            properties: p.projectProperties,
+            projectCacheDir: p.projectCacheDir?.absolutePath,
+            dependencyVerification: p.dependencyVerificationMode.toString().toLowerCase()
+        ])
+    }
+}

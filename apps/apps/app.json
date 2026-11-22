@@ -1,0 +1,62 @@
+{
+  "$schema": ".exact/checkout/scripts/app.schema.json",
+  "name": "Voice Notes",
+  "short_name": "Voice Notes",
+  "id": "dev.disposabl.fresh.voicenotes",
+  "start_url": "/",
+  "display": "standalone",
+  "env": [
+    "CONVEX_ORIGIN"
+  ],
+  "app": {
+    "id": "dev.disposabl.fresh.voicenotes",
+    "name": "Voice Notes"
+  },
+  "variants": {
+    "preview": {
+      "idSuffix": ".preview",
+      "name": "Voice Notes Preview"
+    }
+  },
+  "host": {
+    "web": {},
+    "android": {
+      "id": "dev.disposabl.fresh.voicenotes"
+    },
+    "ios": {
+      "minimumOS": "17.0",
+      "deviceFamily": [
+        "iphone",
+        "ipad"
+      ]
+    },
+    "macos": {
+      "minimumOS": "14.0",
+      "window": {
+        "width": 900,
+        "height": 700
+      }
+    },
+    "linux": {},
+    "windows": {}
+  },
+  "deploy": {
+    "store": {
+      "web": "0",
+      "ios": "0",
+      "macos": "0",
+      "linux": "0",
+      "windows": "0"
+    }
+  },
+  "version": "0.1.0",
+  "icons": [
+    {
+      "src": "assets/icon.png",
+      "type": "image/png",
+      "sizes": "1024x1024",
+      "purpose": "any"
+    }
+  ],
+  "audio_session": "playback"
+}
