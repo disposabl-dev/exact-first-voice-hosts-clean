@@ -43,5 +43,8 @@
   "counter.saving": "सेव हो रहा है…",
   "counter.title": "लाइव काउंटर",
   "language.picker": "भाषा, {name}",
-  "language.system": "डिवाइस की भाषा इस्तेमाल करें"
+  "language.system": "डिवाइस की भाषा इस्तेमाल करें",
+  "purpose.microphone": "माइक्रोफ़ोन से वॉइस नोट रिकॉर्ड करें।",
+  "purpose.recordingInBackground": "ऐप के बैकग्राउंड में होने पर भी वॉइस नोट रिकॉर्ड करते रहें।",
+  "purpose.transcribe": "अपने वॉइस नोट का लिखित रूप बनाएँ।"
 }

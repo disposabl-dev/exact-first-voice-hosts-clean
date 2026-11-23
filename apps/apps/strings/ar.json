@@ -43,5 +43,8 @@
   "counter.saving": "جارٍ الحفظ…",
   "counter.title": "العدّاد المباشر",
   "language.picker": "اللغة، {name}",
-  "language.system": "استخدام لغة الجهاز"
+  "language.system": "استخدام لغة الجهاز",
+  "purpose.microphone": "تسجيل ملاحظة صوتية باستخدام الميكروفون.",
+  "purpose.recordingInBackground": "متابعة تسجيل ملاحظتك الصوتية عندما يكون التطبيق في الخلفية.",
+  "purpose.transcribe": "إنشاء نص مكتوب لملاحظتك الصوتية."
 }

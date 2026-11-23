@@ -43,5 +43,8 @@
   "counter.saving": "Saving…",
   "counter.title": "Live counter",
   "language.picker": "Language, {name}",
-  "language.system": "Use device language"
+  "language.system": "Use device language",
+  "purpose.microphone": "Record a voice note with your microphone.",
+  "purpose.recordingInBackground": "Keep recording your voice note while the app is in the background.",
+  "purpose.transcribe": "Create a transcript of your voice note."
 }
