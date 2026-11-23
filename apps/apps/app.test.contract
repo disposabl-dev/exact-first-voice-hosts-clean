@@ -1,26 +1,3 @@
-test "the greeting loads"
-  locale "en-US"
-  expect tree has "root"
-  expect text "greeting" == "Hello from Apps."
-
-test "the header's button likes it"
-  tap "like"
-  expect state liked == true
-
-test "Arabic follows the device and a manual choice survives reload"
-  locale "ar-EG"
-  expect text "counter-title" == "العدّاد المباشر"
-  type "language-picker" "hi"
-  expect text "counter-title" == "लाइव काउंटर"
-  reload
-  expect text "counter-title" == "लाइव काउंटर"
-  type "language-picker" "ar"
-  expect text "counter-title" == "العدّاد المباشر"
-  type "language-picker" "en"
-  expect text "counter-title" == "Live counter"
-  tap "language-system"
-  expect text "counter-title" == "العدّاد المباشر"
-
-test "an unsupported device language falls back to English"
-  locale "fr-FR"
-  expect text "counter-title" == "Live counter"
+test "voice notes opens"
+  expect tree has "recorder"
+  expect tree has "toggle"

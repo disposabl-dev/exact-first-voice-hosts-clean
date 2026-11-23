@@ -1,28 +1,27 @@
 {
   "$schema": ".exact/checkout/scripts/app.schema.json",
-  "name": "Apps",
-  "short_name": "Apps",
-  "id": "com.example.apps-8d662a",
+  "name": "Voice Notes",
+  "short_name": "Voice Notes",
+  "id": "dev.disposabl.fresh.voicenotes",
   "start_url": "/",
   "display": "standalone",
   "env": [
-    "CONVEX_ORIGIN",
-    "CONVEX_SITE_ORIGIN"
+    "CONVEX_ORIGIN"
   ],
   "app": {
-    "id": "com.example.apps-8d662a",
-    "name": "Apps"
+    "id": "dev.disposabl.fresh.voicenotes",
+    "name": "Voice Notes"
   },
   "variants": {
     "preview": {
       "idSuffix": ".preview",
-      "name": "Apps Preview"
+      "name": "Voice Notes Preview"
     }
   },
   "host": {
     "web": {},
     "android": {
-      "id": "dev.disposabl.exact"
+      "id": "dev.disposabl.fresh.voicenotes"
     },
     "ios": {
       "minimumOS": "17.0",
@@ -62,5 +61,6 @@
   "before_build": [
     "bun",
     "scripts/locales.mjs"
-  ]
+  ],
+  "audio_session": "playback"
 }
